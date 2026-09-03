@@ -30,7 +30,12 @@ def main():
             "scripted_caller_lines": sample["scripted_caller_lines"],
         }
 
-        final_state = graph.invoke(initial_state)
+        # run_name/tags make each call findable as its own trace in LangSmith
+        # (only takes effect if LANGCHAIN_TRACING_V2=true is set in .env)
+        final_state = graph.invoke(
+            initial_state,
+            config={"run_name": f"demo:{sample['id']}", "tags": ["demo", sample["id"]]},
+        )
 
         print(f"\n=== {sample['id']} ({sample['caller_number']}) ===")
         for turn in final_state.get("transcript", []):

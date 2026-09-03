@@ -37,7 +37,12 @@ def run_eval():
             "max_turns": 3,
             "scripted_caller_lines": case["scripted_caller_lines"],
         }
-        final_state = graph.invoke(initial_state)
+        # run_name/tags group this eval run's traces in LangSmith separately
+        # from ad-hoc demo runs (only active if LANGCHAIN_TRACING_V2=true).
+        final_state = graph.invoke(
+            initial_state,
+            config={"run_name": f"eval:{case['id']}", "tags": ["eval", case["id"]]},
+        )
 
         actual_category = final_state.get("category")
         actual_route = final_state.get("route")

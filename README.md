@@ -66,6 +66,26 @@ pip install -r requirements.txt
 cp .env.example .env   # then add your ANTHROPIC_API_KEY
 ```
 
+## Tracing and evaluation with LangSmith
+
+Sign up for a free account at smith.langchain.com, create an API key, and add
+to `.env`:
+
+```
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your_key_here
+LANGCHAIN_PROJECT=futurerouter
+```
+
+Once set, every `graph.invoke()` call in `run_demo.py` and
+`eval/eval_harness.py` is automatically traced -- no code changes needed
+beyond the `run_name`/`tags` already passed in, which group traces by
+sample/case id so a specific call's full node-by-node execution (inputs,
+outputs, latency, and the reputation-gate/classify-gate routing decisions)
+can be inspected directly in the LangSmith UI. This is what turns "there's
+an eval harness" into something you can actually show: a real trace of the
+agent's decision path for each call, not just a pass/fail number.
+
 ## Run the demo
 
 ```bash
@@ -86,7 +106,7 @@ this product.
 
 - [x] LangGraph agent with conditional routing and reputation short-circuit
 - [x] Offline eval harness with false-block/false-pass tracking
-- [ ] LangSmith tracing integration
+- [x] LangSmith tracing integration
 - [ ] Live telephony: Twilio Voice + Media Streams
 - [ ] Streaming ASR (Deepgram) + TTS (ElevenLabs) for real-time conversation
 - [ ] Shared blocklist/allowlist persistence (Postgres/Redis)
