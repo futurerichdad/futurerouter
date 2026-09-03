@@ -1,0 +1,10 @@
+[
+  {"id": "real_1", "caller_number": "+15552223333", "scripted_caller_lines": ["Hey, it's Mike from down the street, is this Ben's number? I wanted to ask about borrowing the ladder."], "expected_category": "real_caller", "expected_route": "pass_to_user"},
+  {"id": "robocall_1", "caller_number": "+15554445555", "scripted_caller_lines": ["This is an important message about your vehicle's extended warranty. Press 1 to speak with a representative."], "expected_category": "robocall", "expected_route": "voicemail"},
+  {"id": "solicitor_1", "caller_number": "+15556667777", "scripted_caller_lines": ["Hi there, I'm calling from Apex Solar Solutions, we're offering free consultations for homeowners in your area, do you have a few minutes?"], "expected_category": "solicitor", "expected_route": "block"},
+  {"id": "real_2", "caller_number": "+15551112222", "scripted_caller_lines": ["Hi, this is Dr. Patel's office calling to confirm your appointment tomorrow at 2pm."], "expected_category": "real_caller", "expected_route": "pass_to_user"},
+  {"id": "robocall_2", "caller_number": "+15553334444", "scripted_caller_lines": ["Your electric bill payment was not processed. Press 1 now to avoid service interruption."], "expected_category": "robocall", "expected_route": "voicemail"},
+  {"id": "solicitor_2", "caller_number": "+15557778888", "scripted_caller_lines": ["Good afternoon, I'm reaching out from Premier Windows and Siding about our current spring promotion."], "expected_category": "solicitor", "expected_route": "block"},
+  {"id": "known_bad_1", "caller_number": "+15551234567", "scripted_caller_lines": [], "expected_category": "solicitor", "expected_route": "block"},
+  {"id": "known_good_1", "caller_number": "+15550001111", "scripted_caller_lines": [], "expected_category": "real_caller", "expected_route": "pass_to_user"}
+]

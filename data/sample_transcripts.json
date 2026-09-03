@@ -1,0 +1,30 @@
+[
+  {
+    "id": "real_1",
+    "caller_number": "+15552223333",
+    "scripted_caller_lines": [
+      "Hey, it's Mike from down the street, is this Ben's number? I wanted to ask about borrowing the ladder."
+    ]
+  },
+  {
+    "id": "robocall_1",
+    "caller_number": "+15554445555",
+    "scripted_caller_lines": [
+      "This is an important message about your vehicle's extended warranty. Press 1 to speak with a representative."
+    ]
+  },
+  {
+    "id": "solicitor_1",
+    "caller_number": "+15556667777",
+    "scripted_caller_lines": [
+      "Hi there, I'm calling from Apex Solar Solutions, we're offering free consultations for homeowners in your area, do you have a few minutes?"
+    ]
+  },
+  {
+    "id": "ambiguous_1",
+    "caller_number": "+15558889999",
+    "scripted_caller_lines": [
+      "Hello, this is calling regarding a recent inquiry, is this a good time to talk?"
+    ]
+  }
+]
