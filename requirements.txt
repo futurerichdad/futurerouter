@@ -7,3 +7,6 @@ langchain-core<1.0
 langsmith<0.2
 anthropic<1.0
 python-dotenv>=1.0.0
+flask>=3.0.0
+twilio>=9.0.0
+gunicorn>=21.0.0
