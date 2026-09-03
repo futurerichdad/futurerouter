@@ -102,6 +102,30 @@ Reports per-case pass/fail plus overall accuracy, false-block rate, and
 false-pass rate -- the two error types that matter most differently for
 this product.
 
+## Troubleshooting
+
+**"Connection error" / "actively refused" when calling the Anthropic API.**
+Check for a stray `ANTHROPIC_BASE_URL` environment variable pointing at a
+local port (commonly `http://localhost:11434`, Ollama's default) -- this
+silently redirects the SDK away from the real API and produces a generic
+connection error that looks identical to a network/firewall problem. Check
+with:
+
+```bash
+echo $ANTHROPIC_BASE_URL      # bash/zsh
+echo $env:ANTHROPIC_BASE_URL  # PowerShell
+```
+
+and clear it if set.
+
+**Dependency versions matter here.** `requirements.txt` pins `anthropic`,
+`langchain-anthropic`, `langgraph`, and `langsmith` below versions that pull
+in a newer `httpx2`/`httpcore2` transport stack -- on at least some Windows
+setups that stack fails with a persistent, misleading "connection actively
+refused" error even when the network, DNS, TLS, and every other layer are
+fine. Downgrading to the pinned versions (which use the standard
+`httpx`/`httpcore`) resolved it.
+
 ## Roadmap
 
 - [x] LangGraph agent with conditional routing and reputation short-circuit

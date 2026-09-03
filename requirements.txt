@@ -1,4 +1,9 @@
-langgraph>=0.2.0
-langchain-anthropic>=0.2.0
-langchain-core>=0.3.0
+# Pinned to versions confirmed working end-to-end (standard httpx/httpcore
+# transport, not the newer httpx2/httpcore2 stack some later releases pull
+# in). If you bump these, re-run eval/eval_harness.py before trusting output.
+langgraph<1.0
+langchain-anthropic<0.4
+langchain-core<1.0
+langsmith<0.2
+anthropic<1.0
 python-dotenv>=1.0.0
