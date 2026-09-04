@@ -91,6 +91,10 @@ def voice_incoming():
                 "turn_count": 0,
                 "max_turns": 3,
                 "scripted_caller_lines": [],
+                # Gate: ignore transcription events while our own TTS is
+                # playing, so the agent does not transcribe its own voice
+                # as if it were the caller speaking.
+                "listening": False,
             }
             _telnyx_command(call_control_id, "answer")
 
@@ -100,18 +104,35 @@ def voice_incoming():
             _start_transcription(call_control_id)
             greeting = "Hi, this number is screened. Who's calling and what's this about?"
             state["transcript"].append({"speaker": "agent", "text": greeting})
+            state["listening"] = False
             _speak(call_control_id, greeting)
+
+    elif event_type == "call.speak.ended":
+        # The agent just finished talking -- now it is safe to treat
+        # transcription events as real caller speech.
+        state = _CALL_STATE.get(call_control_id)
+        if state is not None:
+            state["listening"] = True
 
     elif event_type == "call.transcription":
         state = _CALL_STATE.get(call_control_id)
         if state is None:
             return jsonify({"ok": True})
 
+        if not state.get("listening"):
+            # Still (or again) playing our own TTS -- ignore, this is not
+            # the caller.
+            return jsonify({"ok": True})
+
         transcription_data = payload.get("transcription_data", {})
-        text = transcription_data.get("transcript", "")
+        text = transcription_data.get("transcript", "").strip()
         is_final = transcription_data.get("is_final", False)
 
-        if text and is_final:
+        # Ignore trivial/near-empty transcriptions (background noise,
+        # breathing, a stray word) rather than treating them as a
+        # completed caller turn.
+        if text and is_final and len(text.split()) >= 2:
+            state["listening"] = False  # stop listening while we think/respond
             state["transcript"].append({"speaker": "caller", "text": text})
             result = graph.invoke(state)
             _CALL_STATE[call_control_id] = result
