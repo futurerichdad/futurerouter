@@ -17,6 +17,7 @@ Flow:
                               message / block+hangup)
 """
 import os
+import threading
 import requests
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
@@ -32,8 +33,35 @@ TELNYX_API_KEY = os.environ.get("TELNYX_API_KEY")
 TELNYX_API_BASE = "https://api.telnyx.com/v2"
 REAL_NUMBER = os.environ.get("FORWARD_TO_NUMBER")  # your real phone, E.164 format
 TELNYX_NUMBER = os.environ.get("TELNYX_NUMBER")    # the FutureRouter number itself, E.164
+NO_RESPONSE_TIMEOUT_SECONDS = float(os.environ.get("NO_RESPONSE_TIMEOUT_SECONDS", "8"))
 
 _CALL_STATE: dict[str, dict] = {}  # keyed by call_control_id
+
+def _handle_no_response(call_control_id: str) -> None:
+    """
+    Fires NO_RESPONSE_TIMEOUT_SECONDS after the agent starts listening for a
+    turn. If the caller still hasn't said anything real by then (classic
+    robocall/silence pattern, or a dead line), route to voicemail instead of
+    leaving the call open indefinitely.
+    """
+    state = _CALL_STATE.get(call_control_id)
+    if state is None:
+        return  # call already ended or already routed
+    if not state.get("listening"):
+        return  # caller spoke in time, or agent is mid-response already
+    state["listening"] = False
+    try:
+        _speak(call_control_id, "We didn't hear anything. Please leave a message after the tone. Goodbye.")
+        _telnyx_command(call_control_id, "hangup")
+    finally:
+        _CALL_STATE.pop(call_control_id, None)
+
+
+def _arm_no_response_timer(call_control_id: str) -> None:
+    timer = threading.Timer(NO_RESPONSE_TIMEOUT_SECONDS, _handle_no_response, args=(call_control_id,))
+    timer.daemon = True
+    timer.start()
+
 
 
 def _telnyx_command(call_control_id: str, command: str, payload: dict | None = None) -> dict:
@@ -109,10 +137,12 @@ def voice_incoming():
 
     elif event_type == "call.speak.ended":
         # The agent just finished talking -- now it is safe to treat
-        # transcription events as real caller speech.
+        # transcription events as real caller speech. Start a countdown:
+        # if nothing real comes in before it fires, treat it as silence.
         state = _CALL_STATE.get(call_control_id)
         if state is not None:
             state["listening"] = True
+            _arm_no_response_timer(call_control_id)
 
     elif event_type == "call.transcription":
         state = _CALL_STATE.get(call_control_id)
