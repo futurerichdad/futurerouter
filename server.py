@@ -45,6 +45,8 @@ def _handle_no_response(call_control_id: str) -> None:
     leaving the call open indefinitely.
     """
     state = _CALL_STATE.get(call_control_id)
+    print(f"[no_response_timer] fired for call={call_control_id} state_exists={state is not None} "
+          f"listening={state.get('listening') if state else None}", flush=True)
     if state is None:
         return  # call already ended or already routed
     if not state.get("listening"):
@@ -109,6 +111,7 @@ def voice_incoming():
     event_type = event.get("data", {}).get("event_type")
     payload = event.get("data", {}).get("payload", {})
     call_control_id = payload.get("call_control_id")
+    print(f"[webhook] event={event_type} call={call_control_id}", flush=True)
 
     if event_type == "call.initiated":
         if payload.get("direction") == "incoming":
@@ -157,6 +160,7 @@ def voice_incoming():
         transcription_data = payload.get("transcription_data", {})
         text = transcription_data.get("transcript", "").strip()
         is_final = transcription_data.get("is_final", False)
+        print(f"[transcription] text={text!r} is_final={is_final} listening={state.get('listening')}", flush=True)
 
         # Ignore trivial/near-empty transcriptions (background noise,
         # breathing, a stray word) rather than treating them as a
@@ -166,6 +170,8 @@ def voice_incoming():
             state["transcript"].append({"speaker": "caller", "text": text})
             result = graph.invoke(state)
             _CALL_STATE[call_control_id] = result
+            print(f"[decision] category={result.get('category')} confidence={result.get('confidence')} "
+                  f"route={result.get('route')} done={result.get('done')}", flush=True)
 
             if result.get("done"):
                 route = result.get("route")
