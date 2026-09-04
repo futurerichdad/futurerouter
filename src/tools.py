@@ -19,11 +19,18 @@ _ALLOWLIST = {
 }
 
 
-def lookup_reputation(caller_number: str) -> tuple[Optional[float], str]:
+def lookup_reputation(caller_number: str, user_allowlist: Optional[list[str]] = None) -> tuple[Optional[float], str]:
     """
     Returns (score, source).
     score: 0.0 = known bad, 1.0 = known good, None = no data.
+
+    user_allowlist -- the specific FutureRouter user's own personal allowlist
+    (their saved contacts), checked before the global demo lists. This is
+    what lets a real signed-up user's known contacts bypass screening,
+    separate from the toy global lists below.
     """
+    if user_allowlist and caller_number in user_allowlist:
+        return 1.0, "allowlist:personal_contact"
     if caller_number in _ALLOWLIST:
         return 1.0, f"allowlist:{_ALLOWLIST[caller_number]}"
     if caller_number in _BLOCKLIST:

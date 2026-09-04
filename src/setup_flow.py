@@ -5,10 +5,10 @@ Onboarding / setup-flow logic for FutureRouter.
 The dashboard (not yet built as a web UI) needs to let a user pick between
 two ways of getting calls into the agent:
 
-  1. NEW_TWILIO_NUMBER  - we provision a fresh Twilio number for them.
+  1. NEW_TWILIO_NUMBER  - we provision a fresh FutureRouter number for them.
      Zero setup on their end beyond giving that number out.
   2. EXISTING_NUMBER    - they keep their current number and forward calls
-     from it to a Twilio number we provision behind the scenes.
+     from it to a FutureRouter number we provision behind the scenes.
 
 This module is provider-agnostic on the "existing number" side: it doesn't
 try to auto-configure someone's phone/carrier settings (that API mostly
@@ -23,7 +23,7 @@ from typing import Optional
 
 
 class NumberChoice(str, Enum):
-    NEW_TWILIO_NUMBER = "new_twilio_number"
+    NEW_NUMBER = "new_number"
     EXISTING_NUMBER = "existing_number"
 
 
@@ -40,14 +40,14 @@ class Carrier(str, Enum):
 @dataclass
 class ProvisionedNumber:
     phone_number: str
-    twilio_sid: str
+    telnyx_id: str
     webhook_url: str
 
 
 @dataclass
 class SetupResult:
     choice: NumberChoice
-    screened_number: str          # the number callers actually dial (Twilio's)
+    screened_number: str          # the number callers actually dial (the FutureRouter number's)
     forward_to_number: Optional[str]  # user's real number, for the "pass_to_user" route
     instructions: list[str] = field(default_factory=list)
     requires_manual_step: bool = False
@@ -55,50 +55,64 @@ class SetupResult:
 
 # --- Step 1: provisioning ---------------------------------------------------
 
-def provision_twilio_number(area_code: Optional[str] = None, webhook_base_url: str = "") -> ProvisionedNumber:
-    """
-    Buys a Twilio number and points its voice webhook at our call-handling
-    endpoint. Requires TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN in the
-    environment. Raises RuntimeError with a clear message if the Twilio SDK
-    isn't installed yet or credentials are missing, rather than failing
-    with an unrelated import error deep in a request handler.
-    """
-    account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
-    auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
-    if not account_sid or not auth_token:
+TELNYX_API_BASE = "https://api.telnyx.com/v2"
+
+
+def _telnyx_headers() -> dict:
+    api_key = os.environ.get("TELNYX_API_KEY")
+    if not api_key:
         raise RuntimeError(
-            "Twilio credentials missing. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN "
-            "in .env before provisioning a number."
+            "Telnyx credentials missing. Set TELNYX_API_KEY in .env before provisioning a number."
+        )
+    return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+
+def provision_telnyx_number(area_code: Optional[str] = None, webhook_base_url: str = "") -> ProvisionedNumber:
+    """
+    Buys a Telnyx number and points its Call Control application at our
+    call-handling webhook. Requires TELNYX_API_KEY and
+    TELNYX_CALL_CONTROL_APP_ID in the environment -- the application itself
+    (with its webhook URL) is created once in the Telnyx portal; provisioning
+    just buys a number and assigns it to that existing application.
+    """
+    import requests
+
+    headers = _telnyx_headers()
+    connection_id = os.environ.get("TELNYX_CALL_CONTROL_APP_ID")
+    if not connection_id:
+        raise RuntimeError(
+            "TELNYX_CALL_CONTROL_APP_ID missing. Create a Voice API application in the "
+            "Telnyx portal pointed at your webhook URL, then set its ID in .env."
         )
 
-    try:
-        from twilio.rest import Client
-    except ImportError as e:
-        raise RuntimeError(
-            "twilio package not installed. Run: pip install twilio"
-        ) from e
-
-    client = Client(account_sid, auth_token)
-
-    search_kwargs = {"limit": 1}
+    search_params = {"filter[country_code]": "US", "filter[limit]": 1}
     if area_code:
-        search_kwargs["area_code"] = area_code
+        search_params["filter[national_destination_code]"] = area_code
 
-    available = client.available_phone_numbers("US").local.list(**search_kwargs)
-    if not available:
-        raise RuntimeError("No available Twilio numbers matched the search criteria.")
+    search_resp = requests.get(
+        f"{TELNYX_API_BASE}/available_phone_numbers", params=search_params, headers=headers, timeout=15
+    )
+    search_resp.raise_for_status()
+    results = search_resp.json().get("data", [])
+    if not results:
+        raise RuntimeError("No available Telnyx numbers matched the search criteria.")
+
+    number_to_buy = results[0]["phone_number"]
+
+    order_resp = requests.post(
+        f"{TELNYX_API_BASE}/number_orders",
+        json={"phone_numbers": [{"phone_number": number_to_buy}], "connection_id": connection_id},
+        headers=headers,
+        timeout=15,
+    )
+    order_resp.raise_for_status()
+    order_data = order_resp.json().get("data", {})
 
     voice_url = f"{webhook_base_url.rstrip('/')}/voice/incoming"
 
-    purchased = client.incoming_phone_numbers.create(
-        phone_number=available[0].phone_number,
-        voice_url=voice_url,
-        voice_method="POST",
-    )
-
     return ProvisionedNumber(
-        phone_number=purchased.phone_number,
-        twilio_sid=purchased.sid,
+        phone_number=number_to_buy,
+        telnyx_id=order_data.get("id", ""),
         webhook_url=voice_url,
     )
 
@@ -132,7 +146,7 @@ _CARRIER_FORWARD_CODES = {
         "no_answer": None,
         "cancel": None,
         "notes": "Google Voice doesn't forward TO an external number via dial codes -- "
-                 "instead, add the Twilio number as a linked/forwarding number in "
+                 "instead, add the FutureRouter number as a linked/forwarding number in "
                  "Google Voice settings (Settings > Calls > Forward calls to).",
     },
     Carrier.TEXTNOW: {
@@ -141,7 +155,7 @@ _CARRIER_FORWARD_CODES = {
         "cancel": None,
         "notes": "TextNow's call forwarding is a paid-plan feature, not a dial code. "
                  "In the TextNow app: Settings > Calling > set your call forwarding number "
-                 "to the Twilio number below. Free-tier TextNow accounts cannot forward calls; "
+                 "to the FutureRouter number below. Free-tier TextNow accounts cannot forward calls; "
                  "if you're on the free tier, use the New Twilio Number option instead.",
     },
     Carrier.OTHER_VOIP: {
@@ -149,7 +163,7 @@ _CARRIER_FORWARD_CODES = {
         "no_answer": None,
         "cancel": None,
         "notes": "Check your VoIP app/provider's settings for a 'call forwarding' option "
-                 "and point it at the Twilio number below. Dial codes generally don't apply "
+                 "and point it at the FutureRouter number below. Dial codes generally don't apply "
                  "to app-based VoIP numbers.",
     },
     Carrier.UNKNOWN: {
@@ -158,7 +172,7 @@ _CARRIER_FORWARD_CODES = {
         "cancel": None,
         "notes": "We don't have forwarding instructions for this carrier yet. Search "
                  "'[your carrier] conditional call forwarding code' or check your carrier's "
-                 "app/account settings, and forward to the Twilio number below.",
+                 "app/account settings, and forward to the FutureRouter number below.",
     },
 }
 
@@ -214,12 +228,12 @@ def run_setup(
 ) -> SetupResult:
     """
     Single entry point the dashboard calls after the user makes their choice.
-    Provisions whatever Twilio number is needed and returns the instructions
+    Provisions whatever FutureRouter number is needed and returns the instructions
     (if any) to show the user.
     """
-    provisioned = provision_twilio_number(area_code=area_code, webhook_base_url=webhook_base_url)
+    provisioned = provision_telnyx_number(area_code=area_code, webhook_base_url=webhook_base_url)
 
-    if choice == NumberChoice.NEW_TWILIO_NUMBER:
+    if choice == NumberChoice.NEW_NUMBER:
         return SetupResult(
             choice=choice,
             screened_number=provisioned.phone_number,

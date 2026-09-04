@@ -21,6 +21,8 @@ class Turn(TypedDict):
 class CallState(TypedDict, total=False):
     # Identity / reputation signals gathered before or during the call
     caller_number: str
+    screened_number: str                   # which FutureRouter number was dialed --
+                                            # used to look up the owning user's allowlist
     reputation_score: Optional[float]      # 0.0 (known bad) - 1.0 (known good/trusted)
     reputation_source: Optional[str]       # e.g. "blocklist", "allowlist", "unknown"
 

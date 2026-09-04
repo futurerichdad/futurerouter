@@ -28,9 +28,21 @@ def _llm():
 
 
 def check_reputation(state: CallState) -> dict:
-    """Cheap, fast first pass before any LLM conversation happens."""
+    """Cheap, fast first pass before any LLM conversation happens.
+
+    Checks the specific FutureRouter user's own personal allowlist (their
+    saved contacts) first, looked up via which screened number was called,
+    before falling back to the global demo allow/block lists.
+    """
     number = state.get("caller_number", "")
-    score, source = lookup_reputation(number)
+    user_allowlist = None
+    screened_number = state.get("screened_number")
+    if screened_number:
+        from .users import find_by_screened_number
+        user = find_by_screened_number(screened_number)
+        if user:
+            user_allowlist = user.get("allowlist", [])
+    score, source = lookup_reputation(number, user_allowlist=user_allowlist)
     return {"reputation_score": score, "reputation_source": source}
 
 

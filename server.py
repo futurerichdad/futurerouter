@@ -23,6 +23,12 @@ from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 
 from src.graph import build_graph
+from src.setup_flow import (
+    NumberChoice,
+    Carrier,
+    run_setup,
+)
+from src.users import save_user, find_by_screened_number, parse_allowlist_input
 
 load_dotenv()
 
@@ -105,6 +111,146 @@ def _start_transcription(call_control_id: str) -> None:
     })
 
 
+SIGNUP_FORM_HTML = """
+<!doctype html>
+<title>FutureRouter Setup</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 60px auto; padding: 0 20px; }
+  label { display: block; margin-top: 20px; font-weight: 600; }
+  input, select, textarea { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; font-family: inherit; }
+  textarea { min-height: 90px; }
+  button { margin-top: 28px; padding: 10px 20px; }
+  .option-card { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; margin-top: 8px; }
+  .option-card input[type=radio] { width: auto; display: inline; margin-right: 8px; }
+  .option-card .explain { color: #555; font-size: 0.9em; margin-top: 6px; margin-left: 24px; }
+  .instructions { background: #f4f4f4; padding: 16px; border-radius: 8px; margin-top: 24px; }
+  .instructions li { margin-bottom: 8px; }
+  .hint { color: #555; font-size: 0.85em; margin-top: 4px; }
+</style>
+<h1>Set up FutureRouter</h1>
+<form method="POST" action="/signup">
+  <label>Your real phone number (E.164, e.g. +12065551234)</label>
+  <input name="real_number" required placeholder="+12065551234">
+
+  <label>How do you want to use FutureRouter?</label>
+  <select name="choice" onchange="document.getElementById('existing-number-fields').style.display = this.value === 'existing_number' ? 'block' : 'none'">
+    <option value="new_number">Get a new FutureRouter number to hand out</option>
+    <option value="existing_number">Forward my existing number to FutureRouter</option>
+  </select>
+
+  <div id="existing-number-fields" style="display:none">
+    <label>Your carrier / provider</label>
+    <select name="carrier">
+      <option value="verizon">Verizon</option>
+      <option value="att">AT&amp;T</option>
+      <option value="tmobile">T-Mobile</option>
+      <option value="google_voice">Google Voice</option>
+      <option value="textnow">TextNow</option>
+      <option value="other_voip">Other VoIP app</option>
+      <option value="unknown">Not sure</option>
+    </select>
+
+    <label>Forwarding mode</label>
+    <div class="option-card">
+      <label style="display:inline; font-weight:normal;">
+        <input type="radio" name="forwarding_mode" value="conditional" checked>
+        Conditional (recommended)
+      </label>
+      <div class="explain">
+        Your phone rings first, as normal. Only calls you don't answer within a
+        few rings get forwarded to FutureRouter for screening. Calls you do pick
+        up yourself are never touched. Tradeoff: an unwanted caller still rings
+        your phone once before being screened.
+      </div>
+    </div>
+    <div class="option-card">
+      <label style="display:inline; font-weight:normal;">
+        <input type="radio" name="forwarding_mode" value="unconditional">
+        Unconditional
+      </label>
+      <div class="explain">
+        Every call goes to FutureRouter first, before your phone ever rings.
+        Solicitors and robocalls never make your phone ring at all. Tradeoff:
+        even calls from people you know go through the greeting/screening step
+        first, adding a few seconds delay -- unless you add them to your
+        allowlist below.
+      </div>
+    </div>
+  </div>
+
+  <label>Allowlist -- numbers that should always bypass screening (optional)</label>
+  <textarea name="allowlist" placeholder="One per line, e.g.&#10;Mom: 206-555-1234&#10;+12065559876"></textarea>
+  <div class="hint">
+    Paste numbers you want to always ring straight through, no screening --
+    close contacts, family, work. One per line or comma separated; a name
+    prefix like "Mom: 206-555-1234" is fine, we'll just grab the number.
+    There's no way for a web form to pull directly from your phone's contacts
+    app, so this is a manual paste for now.
+  </div>
+
+  <button type="submit">Set up</button>
+</form>
+"""
+
+
+@app.route("/signup", methods=["GET"])
+def signup_form():
+    return SIGNUP_FORM_HTML
+
+
+@app.route("/signup", methods=["POST"])
+def signup_submit():
+    real_number = request.form.get("real_number", "").strip()
+    choice_str = request.form.get("choice", "new_number")
+    carrier_str = request.form.get("carrier", "unknown")
+    forwarding_mode = request.form.get("forwarding_mode", "conditional")
+    allowlist_raw = request.form.get("allowlist", "")
+
+    if not real_number.startswith("+"):
+        return "Phone number must be in E.164 format, e.g. +12065551234", 400
+
+    webhook_base_url = request.url_root.rstrip("/")
+    allowlist_numbers = parse_allowlist_input(allowlist_raw)
+
+    try:
+        result = run_setup(
+            choice=NumberChoice(choice_str),
+            webhook_base_url=webhook_base_url,
+            real_number=real_number,
+            carrier=Carrier(carrier_str),
+            conditional_forwarding=(forwarding_mode == "conditional"),
+        )
+    except Exception as e:
+        return f"Setup failed: {e}", 500
+
+    save_user(
+        real_number=real_number,
+        screened_number=result.screened_number,
+        choice=result.choice.value,
+        carrier=carrier_str,
+        forwarding_mode=forwarding_mode,
+        allowlist=allowlist_numbers,
+    )
+
+    instructions_html = "".join(f"<li>{step}</li>" for step in result.instructions)
+    allowlist_note = (
+        f"<p>{len(allowlist_numbers)} number(s) saved to your allowlist -- they'll bypass screening entirely.</p>"
+        if allowlist_numbers else
+        "<p>No allowlist numbers added yet -- you can always add them later.</p>"
+    )
+    return f"""
+    <!doctype html>
+    <title>FutureRouter Setup Complete</title>
+    <style>body {{ font-family: system-ui, sans-serif; max-width: 480px; margin: 60px auto; padding: 0 20px; }}
+    .instructions {{ background: #f4f4f4; padding: 16px; border-radius: 8px; }} li {{ margin-bottom: 8px; }}</style>
+    <h1>You're set up</h1>
+    <p>Your FutureRouter number: <strong>{result.screened_number}</strong></p>
+    <p>Forwarding mode: <strong>{forwarding_mode}</strong></p>
+    {allowlist_note}
+    <div class="instructions"><ul>{instructions_html}</ul></div>
+    """
+
+
 @app.route("/voice/incoming", methods=["POST"])
 def voice_incoming():
     event = request.get_json(force=True)
@@ -116,8 +262,10 @@ def voice_incoming():
     if event_type == "call.initiated":
         if payload.get("direction") == "incoming":
             caller_number = payload.get("from", "")
+            screened_number = payload.get("to", "")
             _CALL_STATE[call_control_id] = {
                 "caller_number": caller_number,
+                "screened_number": screened_number,
                 "transcript": [],
                 "turn_count": 0,
                 "max_turns": 3,
@@ -175,9 +323,15 @@ def voice_incoming():
 
             if result.get("done"):
                 route = result.get("route")
-                if route == "pass_to_user" and REAL_NUMBER:
+                # Prefer the signed-up user's own real number (looked up by which
+                # FutureRouter number was dialed) so multiple users each get routed
+                # to their own phone, not a single hardcoded global number.
+                screened_number = state.get("screened_number")
+                owner = find_by_screened_number(screened_number) if screened_number else None
+                forward_to = (owner or {}).get("real_number") or REAL_NUMBER
+                if route == "pass_to_user" and forward_to:
                     _speak(call_control_id, "One moment, connecting you.")
-                    _telnyx_command(call_control_id, "transfer", {"to": REAL_NUMBER})
+                    _telnyx_command(call_control_id, "transfer", {"to": forward_to})
                 elif route == "voicemail":
                     _speak(call_control_id, "Please leave a message after the tone. Goodbye.")
                     _telnyx_command(call_control_id, "hangup")
